@@ -17,3 +17,9 @@ variable "deploy_public_key_path" {
   type        = string
   description = "Path to deploy key public part"
 }
+
+variable "discord_webhook_url" {
+  type        = string
+  description = "Discord webhook URL"
+  default     = ""
+}
