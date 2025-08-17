@@ -101,16 +101,3 @@ EOF
   commit_author  = "Terraform"
   commit_email   = "terraform@example.com"
 }
-
-resource "github_repository_webhook" "discord" {
-  count      = var.discord_webhook_url != "" ? 1 : 0
-  repository = data.github_repository.repo.name
-
-  configuration {
-    url          = var.discord_webhook_url
-    content_type = "json"
-  }
-
-  active = true
-
-  events = ["pull_request"]
