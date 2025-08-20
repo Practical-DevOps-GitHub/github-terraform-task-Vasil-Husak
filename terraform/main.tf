@@ -8,96 +8,142 @@ terraform {
 }
 
 provider "github" {
+  owner = var.github_owner
   token = var.github_token
-  owner = var.repo_owner
 }
 
-# Репозиторій
-data "github_repository" "repo" {
-  name = var.repo_name
+# === Locals block (matches the screenshot exactly) ===
+locals {
+  repo_name        = "github-terraform-task-solution"
+  user_name        = "softservedata"
+  pr_tmplt_content = <<EOT
+## Describe your changes
+
+## Issue ticket number and link
+
+## Checklist before requesting a review
+- [ ] I have performed a self-review of my code
+- [ ] If it is a core feature, I have added thorough tests
+- [ ] Do we need to implement analytics?
+- [ ] Will this be part of a product update? If yes, please write one phrase about this update
+EOT
 }
 
-# Collaborator
+# Repository lookup (node_id is required for branch protection API)
+data "github_repository" "this" {
+  full_name = "${var.github_owner}/${local.repo_name}"
+}
+
+# Add collaborator
 resource "github_repository_collaborator" "collab" {
-  repository = data.github_repository.repo.name
-  username   = "softservedata"
+  repository = local.repo_name
+  username   = local.user_name
   permission = "push"
 }
 
-# Гілка develop (якщо ще нема)
+# Create 'develop' branch from 'main' and set as default
 resource "github_branch" "develop" {
-  repository = data.github_repository.repo.name
-  branch     = "develop"
+  repository    = local.repo_name
+  branch        = "develop"
+  source_branch = "main"
 }
 
-# Default branch = develop
 resource "github_branch_default" "default" {
-  repository = data.github_repository.repo.name
-  branch     = github_branch.develop.branch
+  repository = local.repo_name
+  branch     = "develop"
   depends_on = [github_branch.develop]
 }
 
-# Protect main branch
-resource "github_branch_protection" "main" {
-  repository_id  = data.github_repository.repo.node_id
-  pattern        = "main"
-
-  required_pull_request_reviews {
-    required_approving_review_count = 0
-    require_code_owner_reviews      = true
-  }
-
-  allows_deletions = false
-  allows_force_pushes = false
-  enforce_admins = true
+# CODEOWNERS on main (code owner for all files)
+resource "github_repository_file" "codeowners" {
+  repository          = local.repo_name
+  file                = "CODEOWNERS"
+  content             = "* @${local.user_name}"
+  branch              = "main"
+  commit_message      = "Add CODEOWNERS for all files"
+  overwrite_on_create = true
 }
 
-# Protect develop branch  
+# PR template in .github/ on main
+resource "github_repository_file" "pr_template" {
+  repository          = local.repo_name
+  file                = ".github/pull_request_template.md"
+  content             = local.pr_tmplt_content
+  branch              = "main"
+  commit_message      = "Add PR template"
+  overwrite_on_create = true
+}
+
+# Protect 'develop' (PR required, 2 approvals)
 resource "github_branch_protection" "develop" {
-  repository_id  = data.github_repository.repo.node_id
+  repository_id  = data.github_repository.this.node_id
   pattern        = "develop"
+  enforce_admins = true
 
   required_pull_request_reviews {
     required_approving_review_count = 2
   }
 
-  allows_deletions = false
-  allows_force_pushes = false
+  depends_on = [
+    github_repository_file.codeowners,
+    github_repository_file.pr_template,
+    github_branch_default.default
+  ]
+}
+
+# Protect 'main' (PR required, code owners must approve)
+resource "github_branch_protection" "main" {
+  repository_id  = data.github_repository.this.node_id
+  pattern        = "main"
   enforce_admins = true
-  depends_on = [github_branch.develop]
+
+  required_pull_request_reviews {
+    require_code_owner_reviews      = true
+    required_approving_review_count = 1
+  }
+
+  depends_on = [
+    github_repository_file.codeowners,
+    github_repository_file.pr_template,
+    github_branch_default.default
+  ]
 }
 
-# Deploy key
-resource "github_repository_deploy_key" "deploy" {
-  repository = data.github_repository.repo.name
+# Deploy key named DEPLOY_KEY
+resource "github_repository_deploy_key" "deploy_key" {
+  repository = local.repo_name
   title      = "DEPLOY_KEY"
-  key        = file(var.deploy_public_key_path)
-  read_only  = true
+  key        = var.deploy_key_public
+  read_only  = false
 }
 
-# Pull Request Template
-resource "github_repository_file" "pr_template" {
-  repository     = data.github_repository.repo.name
-  branch         = "main"
-  file           = ".github/pull_request_template.md"
-  content        = <<-EOF
-## Describe your changes
+# Discord notifications on PR events (expects Discord webhook URL in secret)
+resource "github_repository_webhook" "discord" {
+  repository = local.repo_name
+  active     = true
+  events     = ["pull_request"]
 
+  configuration {
+    url          = var.discord_webhook_url
+    content_type = "json"
+    insecure_ssl = false
+  }
+}
 
-## Issue ticket number and link
+# Actions secrets
+resource "github_actions_secret" "pat" {
+  repository      = local.repo_name
+  secret_name     = "PAT"
+  plaintext_value = var.pat
+}
 
-
-## Checklist before requesting a review
-
-- [ ] I have performed a self-review of my code
-- [ ] If it is a core feature, I have added thorough tests
-- [ ] Do we need to implement analytics?
-- [ ] Will this be part of a product update?
-
-## If yes, please write one phrase about this update
-
-EOF
-  commit_message = "Add pull request template"
-  commit_author  = "Terraform"
-  commit_email   = "terraform@example.com"
+# Store the Terraform source itself in a secret named TERRAFORM (as required)
+resource "github_actions_secret" "terraform_code" {
+  repository  = local.repo_name
+  secret_name = "TERRAFORM"
+  plaintext_value = base64encode(join("\n---\n", [
+    file("${path.module}/main.tf"),
+    file("${path.module}/variables.tf"),
+    file("${path.module}/outputs.tf")
+  ]))
 }

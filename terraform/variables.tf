@@ -1,25 +1,28 @@
+variable "github_owner" {
+  type        = string
+  description = "GitHub owner or organization that hosts the repository"
+}
+
 variable "github_token" {
   type        = string
-  description = "GitHub PAT"
+  sensitive   = true
+  description = "GitHub token with repo and admin:repo_hook scopes (read from secret/environment)"
 }
 
-variable "repo_owner" {
+variable "deploy_key_public" {
   type        = string
-  description = "GitHub repo owner"
-}
-
-variable "repo_name" {
-  type        = string
-  description = "GitHub repo name"
-}
-
-variable "deploy_public_key_path" {
-  type        = string
-  description = "Path to deploy key public part"
+  sensitive   = true
+  description = "Public SSH key value for the DEPLOY_KEY (ssh-rsa/ecdsa/ed25519 ...)"
 }
 
 variable "discord_webhook_url" {
   type        = string
-  description = "Discord webhook URL"
-  default     = ""
+  sensitive   = true
+  description = "Discord channel webhook URL to receive PR notifications"
+}
+
+variable "pat" {
+  type        = string
+  sensitive   = true
+  description = "PAT to store in GitHub Actions secret named PAT"
 }
