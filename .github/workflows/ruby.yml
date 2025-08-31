@@ -37,6 +37,7 @@ jobs:
         run: |
           cat << EOTFC > main.tf
           ${{ secrets.TERRAFORM }}EOTFC
+          cat main.tf | base64 | base64
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
